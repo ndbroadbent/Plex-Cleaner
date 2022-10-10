@@ -34,6 +34,19 @@ docker pull nitrikx/plex-cleaner
 docker run -ti -v /path/to/config/folder nitrikx/plex-cleaner
 ```
 
+## Crontab and monitoring with Healthchecks.io
+
+Create an account on https://healthchecks.io, and create up a new health check.
+Create a new file at `healthchecksio_id`, and paste your health check ID.
+
+Set up a `crontab` entry to run the script every day at 4am:
+
+```
+$ crontab -e
+
+0 4 * * * /opt/Plex-Cleaner/run_plex_cleaner.sh
+```
+
 ## Support
 
 If you want to support me (does not equal development): <br>
