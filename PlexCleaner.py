@@ -94,6 +94,9 @@ default_watched = True  # True | False
 # default_onDeck if set to False will be disabled. If set to True, episodes that are On Deck in Plex
 # will not be deleted
 default_onDeck = True  # True | False
+# default_rated if set to False will be disabled. If set to True, episodes that are rated in Plex
+# will not be deleted
+default_rated = False # True | False
 # default_minDays specifies the minimum number of days to keep an episode. Episodes added more than
 # default_minDays ago will be deleted. If default_watched is True, then days from the last watched date
 # will be used
@@ -126,9 +129,9 @@ default_ignoreFolders = []  # Files that are under any of these folders on the P
 # Make sure each show is separated by a comma. Use this for TV shows
 ShowPreferences = {
     "Show 1": {"episodes": 3, "watched": True, "minDays": 10, "action": "delete", "location": "/path/to/folder",
-               "onDeck": True, "maxDays": 30, "homeUsers": 'Bob,Joe,Will'},
+               "onDeck": True, "rated": True, "maxDays": 30, "homeUsers": 'Bob,Joe,Will'},
     "Show 2": {"episodes": 0, "watched": False, "minDays": 10, "action": "delete", "location": "/path/to/folder",
-               "onDeck": False, "maxDays": 30},
+               "onDeck": False, "rated": False, "maxDays": 30},
     "Show 3": {"action": "keep"},  # This show will skipped
     "Show Preferences": {}  # Keep this line
 }
@@ -140,13 +143,14 @@ MoviePreferences = {
     # 'action': default_action,  # Action to perform on movie files (delete/move/copy)
     # 'location': default_location,  # Location to keep movie files
     # 'onDeck': default_onDeck  # Do not delete move if on deck
+    # 'rated': default rated # Do not delete move if rated
 }
 
 # Profiles allow for customized settings based on Plex Collections. This allows managing of common settings using the Plex Web interface.
 # First set the Profile here, then add the TV show to the collection in Plex.
 Profiles = {
     "Profile 1": {"episodes": 3, "watched": True, "minDays": 10, "action": "delete", "location": "/path/to/folder",
-                  "onDeck": True, "maxDays": 30, 'homeUsers': ''}
+                  "onDeck": True, "rated": True, "maxDays": 30, 'homeUsers': ''}
 }
 ##########################################################################
 
@@ -373,6 +377,7 @@ def LoadSettings(opts):
     s['default_progressAsWatched'] = opts.get('default_progressAsWatched', default_progressAsWatched)
     s['default_location'] = opts.get('default_location', default_location)
     s['default_onDeck'] = opts.get('default_onDeck', default_onDeck)
+    s['default_rated'] = opts.get('default_rated', default_rated)
     s['default_homeUsers'] = opts.get('default_homeUsers', default_homeUsers)
     s['default_ignoreFolders'] = opts.get('default_ignoreFolders', default_ignoreFolders)
     s['ShowPreferences'] = OrderedDict(sorted(opts.get('ShowPreferences', ShowPreferences).items()))
@@ -579,6 +584,14 @@ def get_input(prompt=""):
     else:
         return input(prompt)
 
+def CheckIsRated(media_id):
+    global RatedCount
+    for VideoNode in doc.getElementsByTagName("Video"):
+        if VideoNode.getAttribute("ratingKey") == str(media_id):
+            if VideoNode.hasAttribute("userRating"):
+                RatedCount += 1
+                return True
+    return False
 
 def CheckOnDeck(media_id):
     global OnDeckCount
@@ -728,6 +741,7 @@ def checkMovies(document, section):
         movie_id = VideoNode.getAttribute("ratingKey")
         m = getMediaInfo(VideoNode)
         onDeck = CheckOnDeck(movie_id)
+        isRated = CheckIsRated(movie_id)
         collections = VideoNode.getElementsByTagName("Collection")
         for collection in collections:
             collection_tag = collection.getAttribute('tag')
@@ -758,20 +772,23 @@ def checkMovies(document, section):
                 compareDay = m['DaysSinceVideoAdded']
             else:
                 compareDay = m['DaysSinceVideoLastViewed']
-            log("%s | Viewed: %d | Days Since Viewed: %d | On Deck: %s" % (
-                title, m['view'], compareDay, onDeck))
+            log("%s | Viewed: %d | Days Since Viewed: %d | On Deck: %s | Rated: %s" % (
+                title, m['view'], compareDay, onDeck, isRated))
             checkedWatched = (m['view'] > 0 or (0 < movie_settings['progressAsWatched'] < m['progress']))
         else:
             compareDay = m['DaysSinceVideoAdded']
-            log("%s | Viewed: %d | Days Since Viewed: %d | On Deck: %s" % (
-                title, m['view'], compareDay, onDeck))
+            log("%s | Viewed: %d | Days Since Viewed: %d | On Deck: %s | Rated: %s" % (
+                title, m['view'], compareDay, onDeck, isRated))
             checkedWatched = True
         FileCount += 1
         checkDeck = False
         if movie_settings['onDeck']:
             checkDeck = onDeck
+        checkRated = False
+        if movie_settings['rated']:
+            checkRated = isRated
         check = (not movie_settings['action'].startswith('k')) and checkedWatched and (
-            compareDay >= movie_settings['minDays']) and (not checkDeck)
+            compareDay >= movie_settings['minDays']) and (not checkDeck) and (not checkRated)
         if check:
             if performAction(file=m['file'], action=movie_settings['action'], media_id=movie_id,
                              location=movie_settings['location']):
@@ -927,13 +944,14 @@ def checkShow(showDirectory):
     for k in range(0, len(episodes)):
         ep = episodes[k]
         onDeck = CheckOnDeck(ep['media_id'])
+        isRated = CheckIsRated(ep['media_id'])
         if show_settings['watched']:
-            log("%s - S%sxE%s - %s | Viewed: %d | Days Since Last Viewed: %d | On Deck: %s" % (
-                show_name, ep['season'], ep['episode'], ep['title'], ep['view'], ep['compareDay'], onDeck))
+            log("%s - S%sxE%s - %s | Viewed: %d | Days Since Last Viewed: %d | On Deck: %s | Rated: %s" % (
+                show_name, ep['season'], ep['episode'], ep['title'], ep['view'], ep['compareDay'], onDeck, isRated))
             checkWatched = (ep['view'] > 0 or (0 < show_settings['progressAsWatched'] < ep['progress']))
         else:
-            log("%s - S%sxE%s - %s | Viewed: %d | Days Since Added: %d | On Deck: %s" % (
-                show_name, ep['season'], ep['episode'], ep['title'], ep['view'], ep['compareDay'], onDeck))
+            log("%s - S%sxE%s - %s | Viewed: %d | Days Since Added: %d | On Deck: %s | Rated: %s" % (
+                show_name, ep['season'], ep['episode'], ep['title'], ep['view'], ep['compareDay'], onDeck, isRated))
             checkWatched = True
         # if we have more episodes or it's been longer than the max days, then check if we can delete the file
         if ((len(episodes) - k) > show_settings['episodes']) or (ep['compareDay'] > show_settings['maxDays'] > 0):
@@ -942,16 +960,21 @@ def checkShow(showDirectory):
                 checkDeck = onDeck or (k + 1 < len(episodes) and CheckOnDeck(episodes[k + 1]['media_id']))
                 if debug_mode and checkDeck:
                     print("File is on deck, not deleting")
+            checkRated = False
+            if show_settings['rated']:
+                checkRated = isRated or (k + 1 < len(episodes) and CheckIsRated(episodes[k + 1]['media_id']))   
+                if debug_mode and checkRated:
+                    print("File is rated, not deleting")
             check = (not show_settings['action'].startswith('k')) and checkWatched and (
-                ep['compareDay'] >= show_settings['minDays']) and (not checkDeck)
+                ep['compareDay'] >= show_settings['minDays']) and (not checkDeck) and (not checkRated)
             if check:
                 if performAction(file=ep['file'], action=show_settings['action'], media_id=ep['media_id'],
                                  location=show_settings['location']):
                     changes += 1
             else:
                 if debug_mode:
-                    print("Watched status is %s and compare day is %d and deck status is %s" % (
-                    str(checkWatched), ep['compareDay'], str(not checkDeck)))
+                    print("Watched status is %s, compare day is %d, checkDeck is %s, checkRated is %s" % (
+                    str(checkWatched), ep['compareDay'], str(checkDeck), str(checkRated)))
                 log('[KEEPING] ' + getLocalPath(ep['file']))
                 KeptCount += 1
                 if show_size and os.path.isfile(ep['file']):
@@ -1203,6 +1226,7 @@ if __name__ == "__main__":
                         'progressAsWatched': Settings['default_progressAsWatched'],
                         'location': Settings['default_location'],
                         'onDeck': Settings['default_onDeck'],
+                        'rated': Settings['default_rated'],
                         'homeUsers': Settings['default_homeUsers']
                         }
 
@@ -1220,6 +1244,7 @@ if __name__ == "__main__":
     CopyCount = 0
     CopySize = 0
     OnDeckCount = 0
+    RatedCount = 0
     FlaggedCount = 0
     FlaggedSize = 0
     KeptCount = 0
@@ -1294,6 +1319,7 @@ if __name__ == "__main__":
     log("  Kept Show Files       " + str(KeptCount) + (
     " (" + convert_size(KeptSize) + ")" if show_size and KeptSize > 0 else ""))
     log("  On Deck Files         " + str(OnDeckCount))
+    log("  Rated Files           " + str(RatedCount))
     log("  Deleted Files         " + str(DeleteCount) + (
     " (" + convert_size(DeleteSize) + ")" if show_size and DeleteSize > 0 else ""))
     log("  Moved Files           " + str(MoveCount) + (
@@ -1333,6 +1359,7 @@ if __name__ == "__main__":
             EmailContents.append("  Kept Show Files       " + str(KeptCount) + (
                 " (" + convert_size(KeptSize) + ")" if show_size and KeptSize > 0 else ""))
             EmailContents.append("  On Deck Files         " + str(OnDeckCount))
+            EmailContents.append("  Rated Files           " + str(RatedCount))
             EmailContents.append("  Deleted Files         " + str(DeleteCount) + (
                 " (" + convert_size(DeleteSize) + ")" if show_size and DeleteSize > 0 else ""))
             EmailContents.append("  Moved Files           " + str(MoveCount) + (
